@@ -150,7 +150,6 @@ internal class Program
                         Console.ForegroundColor = _defaultForeColor;
                     }
                 }
-                Console.Write(update.Text);
             }
 
             if (prevRole.HasValue && updates.Count != 0)
