@@ -10,7 +10,7 @@ internal class Program
 
     static async Task Main(string[] args)
     {
-        var program = new Program(@"D:\src\SepCsvSourceGenerator\");
+        var program = new Program(Environment.CurrentDirectory);
         await program.Run();
     }
 
@@ -53,6 +53,8 @@ internal class Program
 
     async Task Run()
     {
+        Console.WriteLine($"KameKodingAgent, running in: " + _rootPath);
+
         ResetConversation();
         while (true)
         {
