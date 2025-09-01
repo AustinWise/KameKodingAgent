@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.AI;
+﻿using Anthropic.SDK;
+using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using System.Text;
 
@@ -6,7 +7,7 @@ namespace KameKodingAgent;
 
 internal class Program
 {
-    const string MODEL_NAME = "qwen3:14b";
+    const string MODEL_NAME = "claude-opus-4-1-20250805";
 
     static async Task Main(string[] args)
     {
@@ -32,15 +33,16 @@ internal class Program
         _rootPath = rootPath;
         _options = new ChatOptions()
         {
+            ModelId = MODEL_NAME,
+            MaxOutputTokens = 4000,
             Tools =
             [
                 AIFunctionFactory.Create(ListFiles),
                 AIFunctionFactory.Create(ReadFile),
-                AIFunctionFactory.Create(EditFile),
+                AIFunctionFactory.Create(WriteFile),
             ],
         };
-        var client = new OllamaSharp.OllamaApiClient("http://localhost:11434", MODEL_NAME);
-        _chatClient = ChatClientBuilderChatClientExtensions.AsBuilder(client).UseFunctionInvocation().Build();
+        _chatClient = new AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages.AsBuilder().UseFunctionInvocation().Build();
         _defaultForeColor = Console.ForegroundColor;
         _conversation = new List<ChatMessage>();
     }
@@ -58,7 +60,10 @@ internal class Program
         ResetConversation();
         while (true)
         {
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("Please enter your prompt. Enter a blank line to finish the prompt.");
+            Console.ForegroundColor = _defaultForeColor;
 
             StringBuilder sb = new StringBuilder();
             while (true)
@@ -95,9 +100,18 @@ internal class Program
             ChatRole? prevRole = null;
             await foreach (var update in _chatClient.GetStreamingResponseAsync(_conversation, _options))
             {
+                if (update.Contents.Count == 0)
+                    continue;
+
                 updates.Add(update);
                 if (!prevRole.HasValue || (prevRole.HasValue && update.Role.HasValue && prevRole.Value != update.Role.Value))
                 {
+                    if (prevRole.HasValue && updates.Count != 0)
+                    {
+                        _conversation.Add(new ChatMessage(prevRole.Value, [.. updates.SelectMany(u => u.Contents)]));
+                        updates.Clear();
+                    }
+
                     var role = update.Role!.Value;
                     Console.WriteLine();
                     Console.ForegroundColor = GetColorForRole(role);
@@ -105,12 +119,45 @@ internal class Program
                     Console.ForegroundColor = _defaultForeColor;
                     prevRole = role;
                 }
+                foreach (var content in update.Contents)
+                {
+                    if (content is TextContent textContent)
+                    {
+                        Console.Write(textContent.Text);
+                    }
+                    else if (content is FunctionCallContent functionCallContent)
+                    {
+                        Console.WriteLine();
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}' />");
+                        Console.ForegroundColor = _defaultForeColor;
+                    }
+                    else if (content is FunctionResultContent functionResultContent)
+                    {
+                        Console.WriteLine();
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine($"<function-result id='{functionResultContent.CallId}'>{functionResultContent.Result?.ToString()}</function-result>");
+                        Console.ForegroundColor = _defaultForeColor;
+                    }
+                    else if (content is UsageContent)
+                    {
+                        // Don't care
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine(content.GetType().Name);
+                        Console.ForegroundColor = _defaultForeColor;
+                    }
+                }
                 Console.Write(update.Text);
             }
 
-
-            // TODO: add the updates to the conversation history
-            break;
+            if (prevRole.HasValue && updates.Count != 0)
+            {
+                _conversation.Add(new ChatMessage(prevRole.Value, [.. updates.SelectMany(u => u.Contents)]));
+                updates.Clear();
+            }
         }
     }
 
@@ -119,10 +166,6 @@ internal class Program
         if (role == ChatRole.Assistant)
         {
             return ConsoleColor.Red;
-        }
-        else if (role == ChatRole.System)
-        {
-            return ConsoleColor.Green;
         }
         else if (role == ChatRole.Tool)
         {
@@ -198,19 +241,13 @@ internal class Program
     [Description("Reads the contents of a file.")]
     string ReadFile(string path)
     {
-        return File.ReadAllText(NormalizePath(path));
+       return File.ReadAllText(NormalizePath(path));
     }
 
-    [Description("Edits a file, by find the value `oldStr` and replacing it with `newStr`.")]
-    string EditFile(string path, string oldStr, string newStr)
+    [Description("Writes content to a file.")]
+    string WriteFile(string path, string newContents)
     {
         path = NormalizePath(path);
-        string fileContents = File.ReadAllText(path);
-        string newContents = fileContents.Replace(oldStr, newStr);
-        if (fileContents == newContents)
-        {
-            throw new Exception("Did not find `oldStr` in the file.");
-        }
         File.WriteAllText(path, newContents);
         return "OK";
     }
