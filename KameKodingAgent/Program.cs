@@ -68,13 +68,19 @@ internal class Program
             StringBuilder sb = new StringBuilder();
             while (true)
             {
-                string? line = Console.ReadLine();
-                if (line == null)
+                string? line = Console.ReadLine()?.Trim();
+                if (line == null || line == "/exit")
                 {
                     Console.WriteLine("Exiting.");
                     return;
                 }
-                if (line.Length == 0)
+                else if (line == "/clear")
+                {
+                    Console.WriteLine("Cleaning context.");
+                    ResetConversation();
+                    continue;
+                }
+                else if (line.Length == 0)
                 {
                     break;
                 }
@@ -82,17 +88,6 @@ internal class Program
             }
 
             string prompt = sb.ToString().Trim();
-            if (prompt == "/clear")
-            {
-                Console.WriteLine("Cleaning context.");
-                ResetConversation();
-                continue;
-            }
-            else if (prompt == "/exit")
-            {
-                Console.WriteLine("Exiting");
-                return;
-            }
 
             _conversation.Add(new ChatMessage(ChatRole.User, prompt));
 
@@ -129,7 +124,15 @@ internal class Program
                     {
                         Console.WriteLine();
                         Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}' />");
+                        Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}'>");
+                        if (functionCallContent?.Arguments is object)
+                        {
+                            foreach (var kvp in functionCallContent.Arguments)
+                            {
+                                Console.WriteLine($"\t<{kvp.Key}>{kvp.Value}</{kvp.Key}");
+                            }
+                        }
+                        Console.WriteLine("</function-call>");
                         Console.ForegroundColor = _defaultForeColor;
                     }
                     else if (content is FunctionResultContent functionResultContent)
@@ -178,40 +181,29 @@ internal class Program
 
     private string NormalizePath(string path)
     {
+        if (!Path.IsPathFullyQualified(path))
+        {
+            path = Path.Combine(_rootPath, path);
+        }
         path = Path.GetFullPath(path);
 
-        DirectoryInfo? dir;
-        if (File.Exists(path))
+        string? remainingPath = path;
+        while (remainingPath != null)
         {
-            var fi = new FileInfo(path);
-            if (fi.Name[0] == '.')
-            {
-                throw new Exception("Trying to read dot file: " + path);
-            }
-            dir = new FileInfo(path).Directory;
-        }
-        else if (Directory.Exists(path))
-        {
-            dir = new DirectoryInfo(path);
-        }
-        else
-        {
-            throw new Exception("Path does not point to anything: " + path);
-        }
-
-        while (dir != null)
-        {
-            if (dir.FullName == _rootPath)
+            if (remainingPath == _rootPath)
             {
                 // Found that we are in the root directory, so it should be ok to read or write this file.
                 return path;
             }
-            if (dir.Name[0] == '.')
+
+            string? fileName = Path.GetFileName(path);
+            if (fileName != null && fileName[0] == '.')
             {
-                // This is for avoiding writing into the .git directory.
-                throw new Exception("File path contains a directory whose name starts with a dot: " + path);
+                // Found that we are in the root directory, so it should be ok to read or write this file.
+                throw new Exception("File path contains a segment whose name starts with a dot: " + path);
             }
-            dir = dir.Parent;
+
+            remainingPath = Path.GetDirectoryName(remainingPath);
         }
 
         throw new Exception($"Path '{path}' not contained in the root directory '{_rootPath}'.");
@@ -240,7 +232,7 @@ internal class Program
     [Description("Reads the contents of a file.")]
     string ReadFile(string path)
     {
-       return File.ReadAllText(NormalizePath(path));
+        return File.ReadAllText(NormalizePath(path));
     }
 
     [Description("Writes content to a file.")]
