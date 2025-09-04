@@ -1,5 +1,6 @@
-﻿using Anthropic.SDK;
-using Microsoft.Extensions.AI;
+﻿using Microsoft.Extensions.AI;
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Text;
 
@@ -7,11 +8,61 @@ namespace KameKodingAgent;
 
 internal class Program
 {
-    const string MODEL_NAME = "claude-opus-4-1-20250805";
+    enum LlmBackend
+    {
+        Anthropic,
+        Ollama,
+    }
 
     static async Task Main(string[] args)
     {
-        var program = new Program(Environment.CurrentDirectory);
+        Option<string> rootDirectoryOption = new("--root-directory")
+        {
+            Description = "What root directory to use, defaults to current directory.",
+            DefaultValueFactory = _ => Environment.CurrentDirectory,
+        };
+
+        Option<LlmBackend> llmBackendOption = new("--llm-backend")
+        {
+            Description = "Which LLM backend to use.",
+            DefaultValueFactory = _ => LlmBackend.Anthropic,
+        };
+
+        Option<string> modelNameOption = new("--model-name")
+        {
+            Description = "Which model to use. How this is interpreted is based on which LLM is used.",
+            DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
+            {
+                LlmBackend.Anthropic => "claude-opus-4-1-20250805",
+                LlmBackend.Ollama => "qwen2.5-coder:7b",
+            },
+        };
+
+        var rootCommand = new RootCommand("KameKodingAgent");
+        rootCommand.Options.Add(rootDirectoryOption);
+        rootCommand.Options.Add(llmBackendOption);
+        rootCommand.Options.Add(modelNameOption);
+
+        ParseResult parseResult = rootCommand.Parse(args);
+        if (parseResult.Errors.Count != 0)
+        {
+            Console.WriteLine("Failed to parse args.");
+            foreach (ParseError parseError in parseResult.Errors)
+            {
+                Console.Error.WriteLine(parseError.Message);
+            }
+            return;
+        }
+
+        string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
+        string modelName = parseResult.GetRequiredValue(modelNameOption);
+        IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
+        {
+            LlmBackend.Anthropic => new Anthropic.SDK.AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages,
+            LlmBackend.Ollama => new OllamaSharp.OllamaApiClient("http://localhost:11434"),
+        };
+
+        var program = new Program(chatClient, rootDirectory, modelName);
         await program.Run();
     }
 
@@ -21,7 +72,7 @@ internal class Program
     private readonly ConsoleColor _defaultForeColor;
     private readonly List<ChatMessage> _conversation;
 
-    private Program(string rootPath)
+    private Program(IChatClient chatClient, string rootPath, string modelName)
     {
         rootPath = Path.GetFullPath(rootPath);
         if (rootPath.EndsWith(Path.DirectorySeparatorChar))
@@ -33,7 +84,7 @@ internal class Program
         _rootPath = rootPath;
         _options = new ChatOptions()
         {
-            ModelId = MODEL_NAME,
+            ModelId = modelName,
             MaxOutputTokens = 4000,
             Tools =
             [
@@ -42,7 +93,7 @@ internal class Program
                 AIFunctionFactory.Create(WriteFile),
             ],
         };
-        _chatClient = new AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages.AsBuilder().UseFunctionInvocation().Build();
+        _chatClient = chatClient.AsBuilder().UseFunctionInvocation().Build();
         _defaultForeColor = Console.ForegroundColor;
         _conversation = new List<ChatMessage>();
     }
@@ -55,7 +106,7 @@ internal class Program
 
     async Task Run()
     {
-        Console.WriteLine($"KameKodingAgent, running in: " + _rootPath);
+        Console.WriteLine($"KameKodingAgent, using model {_options.ModelId}, running in: " + _rootPath);
 
         ResetConversation();
         while (true)
