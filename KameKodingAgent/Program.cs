@@ -8,8 +8,13 @@ namespace KameKodingAgent;
 
 internal class Program
 {
+    // TODO: make configurable
+    const string GCP_PROJECT_ID = "ai-test-414105";
+    const string GCP_REGION = "us-central1";
+
     enum LlmBackend
     {
+        VertexAi, // Does not currently work since Vertex AI only supports a single tool.
         Anthropic,
         Ollama,
     }
@@ -33,6 +38,7 @@ internal class Program
             Description = "Which model to use. How this is interpreted is based on which LLM is used.",
             DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
             {
+                LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-pro",
                 LlmBackend.Anthropic => "claude-opus-4-1-20250805",
                 LlmBackend.Ollama => "qwen2.5-coder:7b",
             },
@@ -58,12 +64,23 @@ internal class Program
         string modelName = parseResult.GetRequiredValue(modelNameOption);
         IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
         {
+            LlmBackend.VertexAi => CreateVertexAiChatClient(),
             LlmBackend.Anthropic => new Anthropic.SDK.AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages,
             LlmBackend.Ollama => new OllamaSharp.OllamaApiClient("http://localhost:11434"),
         };
 
-        var program = new Program(chatClient, rootDirectory, modelName);
+        var program = new Program(chatClient, rootDirectory, parseResult.GetRequiredValue(llmBackendOption), modelName);
         await program.Run();
+    }
+
+    private static IChatClient CreateVertexAiChatClient()
+    {
+        var builder = new Google.Cloud.AIPlatform.V1.PredictionServiceClientBuilder()
+        {
+            Endpoint = $"https://{GCP_REGION}-aiplatform.googleapis.com",
+            QuotaProject = GCP_PROJECT_ID,
+        };
+        return new AWise.AiExtensionsForVertexAi.VertexAiChatClient(builder.Build());
     }
 
     private readonly string _rootPath;
@@ -71,8 +88,9 @@ internal class Program
     private readonly IChatClient _chatClient;
     private readonly ConsoleColor _defaultForeColor;
     private readonly List<ChatMessage> _conversation;
+    private readonly LlmBackend _backend;
 
-    private Program(IChatClient chatClient, string rootPath, string modelName)
+    private Program(IChatClient chatClient, string rootPath, LlmBackend backend, string modelName)
     {
         rootPath = Path.GetFullPath(rootPath);
         if (rootPath.EndsWith(Path.DirectorySeparatorChar))
@@ -85,17 +103,22 @@ internal class Program
         _options = new ChatOptions()
         {
             ModelId = modelName,
-            MaxOutputTokens = 4000,
             Tools =
             [
                 AIFunctionFactory.Create(ListFiles),
                 AIFunctionFactory.Create(ReadFile),
                 AIFunctionFactory.Create(WriteFile),
             ],
+            ToolMode = ChatToolMode.Auto,
         };
+        if (backend == LlmBackend.Anthropic)
+        {
+            _options.MaxOutputTokens = 4000;
+        }
         _chatClient = chatClient.AsBuilder().UseFunctionInvocation().Build();
         _defaultForeColor = Console.ForegroundColor;
         _conversation = new List<ChatMessage>();
+        _backend = backend;
     }
 
     void ResetConversation()
@@ -106,7 +129,7 @@ internal class Program
 
     async Task Run()
     {
-        Console.WriteLine($"KameKodingAgent, using model {_options.ModelId}, running in: " + _rootPath);
+        Console.WriteLine($"KameKodingAgent, using {_backend} with model {_options.ModelId}, running in: " + _rootPath);
 
         ResetConversation();
         while (true)
