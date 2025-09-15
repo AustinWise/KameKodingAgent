@@ -14,6 +14,7 @@ internal class Program
 
     enum LlmBackend
     {
+        Gemini,
         VertexAi, // Does not currently work since Vertex AI only supports a single tool.
         Anthropic,
         Ollama,
@@ -38,6 +39,7 @@ internal class Program
             Description = "Which model to use. How this is interpreted is based on which LLM is used.",
             DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
             {
+                LlmBackend.Gemini => "models/gemini-2.5-pro",
                 LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-pro",
                 LlmBackend.Anthropic => "claude-opus-4-1-20250805",
                 LlmBackend.Ollama => "qwen2.5-coder:7b",
@@ -64,6 +66,7 @@ internal class Program
         string modelName = parseResult.GetRequiredValue(modelNameOption);
         IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
         {
+            LlmBackend.Gemini => CreateGeminiChatClient(),
             LlmBackend.VertexAi => CreateVertexAiChatClient(),
             LlmBackend.Anthropic => new Anthropic.SDK.AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages,
             LlmBackend.Ollama => new OllamaSharp.OllamaApiClient("http://localhost:11434"),
@@ -71,6 +74,16 @@ internal class Program
 
         var program = new Program(chatClient, rootDirectory, parseResult.GetRequiredValue(llmBackendOption), modelName);
         await program.Run();
+    }
+
+    private static IChatClient CreateGeminiChatClient()
+    {
+        var builder = new AWise.AiExtensionsForGemini.GenerativeServiceClientBuilder()
+        {
+            Endpoint = "https://generativelanguage.googleapis.com",
+            ApiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? throw new Exception("Please set the environmental variable GEMINI_API_KEY."),
+        };
+        return new AWise.AiExtensionsForGemini.GenerativeServiceChatClient(builder);
     }
 
     private static IChatClient CreateVertexAiChatClient()
