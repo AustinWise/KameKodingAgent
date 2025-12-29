@@ -93,7 +93,7 @@ internal class Program
             Endpoint = $"https://{GCP_REGION}-aiplatform.googleapis.com",
             QuotaProject = GCP_PROJECT_ID,
         };
-        return new AWise.AiExtensionsForVertexAi.VertexAiChatClient(builder.Build());
+        return Google.Cloud.VertexAI.Extensions.VertexAIExtensions.BuildIChatClient(builder);
     }
 
     private readonly string _rootPath;
