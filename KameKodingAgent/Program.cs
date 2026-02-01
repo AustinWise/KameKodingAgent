@@ -6,20 +6,20 @@ using System.Text;
 
 namespace KameKodingAgent;
 
+enum LlmBackend
+{
+    VertexAi,
+    Anthropic,
+    Ollama,
+}
+
 internal class Program
 {
     // TODO: make configurable
     const string GCP_PROJECT_ID = "ai-test-414105";
     const string GCP_REGION = "us-central1";
 
-    enum LlmBackend
-    {
-        VertexAi,
-        Anthropic,
-        Ollama,
-    }
-
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
         Option<string> rootDirectoryOption = new("--root-directory")
         {
@@ -41,6 +41,7 @@ internal class Program
                 LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-pro",
                 LlmBackend.Anthropic => "claude-opus-4-1-20250805",
                 LlmBackend.Ollama => "qwen2.5-coder:7b",
+                _ => throw new Exception("Programming error: unhandled LLM backend."),
             },
         };
 
@@ -49,7 +50,16 @@ internal class Program
         rootCommand.Options.Add(llmBackendOption);
         rootCommand.Options.Add(modelNameOption);
 
-        ParseResult parseResult = rootCommand.Parse(args);
+        ParseResult parseResult;
+        try
+        {
+            parseResult = rootCommand.Parse(args);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+            return 1;
+        }
         if (parseResult.Errors.Count != 0)
         {
             Console.WriteLine("Failed to parse args.");
@@ -57,7 +67,7 @@ internal class Program
             {
                 Console.Error.WriteLine(parseError.Message);
             }
-            return;
+            return 1;
         }
 
         string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
@@ -67,10 +77,12 @@ internal class Program
             LlmBackend.VertexAi => CreateVertexAiChatClient(),
             LlmBackend.Anthropic => new Anthropic.SDK.AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages,
             LlmBackend.Ollama => new OllamaSharp.OllamaApiClient("http://localhost:11434"),
+            _ => throw new Exception("Programming error: unhandled LLM backend."),
         };
 
         var program = new Program(chatClient, rootDirectory, parseResult.GetRequiredValue(llmBackendOption), modelName);
         await program.Run();
+        return 0;
     }
 
     private static IChatClient CreateVertexAiChatClient()
