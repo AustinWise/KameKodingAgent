@@ -206,6 +206,12 @@ internal class Program
                     {
                         Console.Write(textContent.Text);
                     }
+                    else if (content is TextReasoningContent reasoningContent)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.Write(reasoningContent.Text);
+                        Console.ForegroundColor = _defaultForeColor;
+                    }
                     else if (content is FunctionCallContent functionCallContent)
                     {
                         Console.WriteLine();
