@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
+using System.ClientModel;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.ComponentModel;
@@ -11,13 +12,16 @@ enum LlmBackend
     VertexAi,
     Anthropic,
     Ollama,
+    // The new responses API. More efficent for the offical OpenAI api, but less compatible.
+    OpenAiResponses,
+    // The original chat API, widly supported by other API providers like llama.cpp.
+    OpenAiChat,
 }
 
 internal class Program
 {
     // TODO: make configurable
     const string GCP_PROJECT_ID = "ai-test-414105";
-    const string GCP_REGION = "us-central1";
 
     static async Task<int> Main(string[] args)
     {
@@ -38,10 +42,22 @@ internal class Program
             Description = "Which model to use. How this is interpreted is based on which LLM is used.",
             DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
             {
-                LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-pro",
-                LlmBackend.Anthropic => "claude-opus-4-1-20250805",
-                LlmBackend.Ollama => "qwen2.5-coder:7b",
+                LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/global/publishers/google/models/gemini-3.7-flash",
+                LlmBackend.Anthropic => "claude-haiku-5-5",
+                LlmBackend.Ollama => "gemma4:12b",
+                LlmBackend.OpenAiResponses => "gpt-6-luna",
+                LlmBackend.OpenAiChat => "gpt-6-luna",
                 _ => throw new Exception("Programming error: unhandled LLM backend."),
+            },
+        };
+
+        Option<string?> endpointOption = new("--endpoint")
+        {
+            Description = "Which endpoint to use with for the API.",
+            DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
+            {
+                LlmBackend.Ollama => "http://localhost:11434",
+                _ => null,
             },
         };
 
@@ -49,6 +65,7 @@ internal class Program
         rootCommand.Options.Add(rootDirectoryOption);
         rootCommand.Options.Add(llmBackendOption);
         rootCommand.Options.Add(modelNameOption);
+        rootCommand.Options.Add(endpointOption);
 
         ParseResult parseResult;
         try
@@ -72,11 +89,14 @@ internal class Program
 
         string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
         string modelName = parseResult.GetRequiredValue(modelNameOption);
+        string? endpoint = parseResult.GetRequiredValue(endpointOption);
         IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
         {
             LlmBackend.VertexAi => CreateVertexAiChatClient(),
-            LlmBackend.Anthropic => new Anthropic.SDK.AnthropicClient(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")).Messages,
-            LlmBackend.Ollama => new OllamaSharp.OllamaApiClient("http://localhost:11434"),
+            LlmBackend.Anthropic => new Anthropic.AnthropicClient().AsIChatClient(),
+            LlmBackend.Ollama => new OllamaSharp.OllamaApiClient(endpoint!),
+            LlmBackend.OpenAiResponses => CreateOpenAiResponseClient(endpoint),
+            LlmBackend.OpenAiChat => CreateOpenAiChatClient(modelName, endpoint),
             _ => throw new Exception("Programming error: unhandled LLM backend."),
         };
 
@@ -85,11 +105,48 @@ internal class Program
         return 0;
     }
 
+#pragma warning disable OPENAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
+    private static IChatClient CreateOpenAiResponseClient(string? endpoint)
+    {
+        const string VAR_NAME = "OPENAI_API_KEY";
+        string? apiKey = Environment.GetEnvironmentVariable(VAR_NAME);
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            throw new ArgumentException($"Environmental variable {VAR_NAME} not set.");
+        }
+        var cred = new ApiKeyCredential(apiKey);
+        var options = new OpenAI.Responses.ResponsesClientOptions();
+        if (endpoint != null)
+        {
+            options.Endpoint = new Uri(endpoint);
+        }
+        var client = new OpenAI.Responses.ResponsesClient(cred, options);
+        return client.AsIChatClient();
+    }
+#pragma warning restore OPENAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
+
+    private static IChatClient CreateOpenAiChatClient(string modelName, string? endpoint)
+    {
+        const string VAR_NAME = "OPENAI_API_KEY";
+        string? apiKey = Environment.GetEnvironmentVariable(VAR_NAME);
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            throw new ArgumentException($"Environmental variable {VAR_NAME} not set.");
+        }
+        var cred = new ApiKeyCredential(apiKey);
+        var options = new OpenAI.OpenAIClientOptions();
+        if (endpoint != null)
+        {
+            options.Endpoint = new Uri(endpoint);
+        }
+        var client = new OpenAI.Chat.ChatClient(modelName, cred, options);
+        return client.AsIChatClient();
+    }
+
     private static IChatClient CreateVertexAiChatClient()
     {
         var builder = new Google.Cloud.AIPlatform.V1.PredictionServiceClientBuilder()
         {
-            Endpoint = $"https://{GCP_REGION}-aiplatform.googleapis.com",
             QuotaProject = GCP_PROJECT_ID,
         };
         return Google.Cloud.VertexAI.Extensions.VertexAIExtensions.BuildIChatClient(builder);
