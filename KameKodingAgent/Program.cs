@@ -232,101 +232,106 @@ internal class Program
 
             string prompt = sb.ToString().Trim();
 
-            _conversation.Add(new ChatMessage(ChatRole.User, prompt));
+            await ProcessUserPrompt(prompt);
+        }
+    }
 
-            var updates = new List<ChatResponseUpdate>();
-            bool? isThinking = null;
-            string? prevRole = null;
-            await foreach (var update in _chatClient.GetStreamingResponseAsync(_conversation, _options))
+    private async Task ProcessUserPrompt(string prompt)
+    {
+        _conversation.Add(new ChatMessage(ChatRole.User, prompt));
+
+        var updates = new List<ChatResponseUpdate>();
+        bool? isThinking = null;
+        string? prevRole = null;
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(_conversation, _options))
+        {
+            if (update.ConversationId == null)
             {
-                if (update.ConversationId == null)
-                {
-                    updates.Add(update);
-                }
-                else
-                {
-                    _options.ConversationId = update.ConversationId;
-                }
-
-                if (update.Role.HasValue && (prevRole is null || prevRole != update.Role.Value.Value))
-                {
-                    string role = update.Role.Value.Value;
-                    Console.WriteLine();
-                    Console.ForegroundColor = GetColorForRole(role);
-                    Console.Write($"{role}: ");
-                    Console.ForegroundColor = _defaultForeColor;
-                    prevRole = role;
-                }
-                foreach (var content in update.Contents)
-                {
-                    if (content is TextContent textContent)
-                    {
-                        if (isThinking == true)
-                        {
-                            Console.WriteLine();
-                        }
-                        isThinking = false;
-                        Console.Write(textContent.Text);
-                    }
-                    else if (content is TextReasoningContent reasoningContent)
-                    {
-                        if (isThinking == false)
-                        {
-                            Console.WriteLine();
-                        }
-                        isThinking = true;
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.Write(reasoningContent.Text);
-                        Console.ForegroundColor = _defaultForeColor;
-                    }
-                    else if (content is FunctionCallContent functionCallContent)
-                    {
-                        isThinking = null;
-                        Console.WriteLine();
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}'>");
-                        if (functionCallContent?.Arguments is object)
-                        {
-                            foreach (var kvp in functionCallContent.Arguments)
-                            {
-                                Console.WriteLine($"\t<{kvp.Key}>{kvp.Value}</{kvp.Key}");
-                            }
-                        }
-                        Console.WriteLine("</function-call>");
-                        Console.ForegroundColor = _defaultForeColor;
-                    }
-                    else if (content is FunctionResultContent functionResultContent)
-                    {
-                        isThinking = null;
-                        Console.WriteLine();
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine($"<function-result id='{functionResultContent.CallId}'>{functionResultContent.Result?.ToString()}</function-result>");
-                        Console.ForegroundColor = _defaultForeColor;
-                    }
-                    else if (content is UsageContent)
-                    {
-                        // Don't care
-                    }
-                    else
-                    {
-                        isThinking = null;
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine(content.GetType().Name);
-                        Console.ForegroundColor = _defaultForeColor;
-                    }
-                }
-            }
-
-            if (_options.ConversationId == null)
-            {
-                // Stateless API
-                _conversation.AddRange(updates.ToChatResponse().Messages);
+                updates.Add(update);
             }
             else
             {
-                // Stateful API
-                _conversation.Clear();
+                _options.ConversationId = update.ConversationId;
             }
+
+            if (update.Role.HasValue && (prevRole is null || prevRole != update.Role.Value.Value))
+            {
+                string role = update.Role.Value.Value;
+                Console.WriteLine();
+                Console.ForegroundColor = GetColorForRole(role);
+                Console.Write($"{role}: ");
+                Console.ForegroundColor = _defaultForeColor;
+                prevRole = role;
+            }
+            foreach (var content in update.Contents)
+            {
+                if (content is TextContent textContent)
+                {
+                    if (isThinking == true)
+                    {
+                        Console.WriteLine();
+                    }
+                    isThinking = false;
+                    Console.Write(textContent.Text);
+                }
+                else if (content is TextReasoningContent reasoningContent)
+                {
+                    if (isThinking == false)
+                    {
+                        Console.WriteLine();
+                    }
+                    isThinking = true;
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write(reasoningContent.Text);
+                    Console.ForegroundColor = _defaultForeColor;
+                }
+                else if (content is FunctionCallContent functionCallContent)
+                {
+                    isThinking = null;
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}'>");
+                    if (functionCallContent?.Arguments is object)
+                    {
+                        foreach (var kvp in functionCallContent.Arguments)
+                        {
+                            Console.WriteLine($"\t<{kvp.Key}>{kvp.Value}</{kvp.Key}");
+                        }
+                    }
+                    Console.WriteLine("</function-call>");
+                    Console.ForegroundColor = _defaultForeColor;
+                }
+                else if (content is FunctionResultContent functionResultContent)
+                {
+                    isThinking = null;
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"<function-result id='{functionResultContent.CallId}'>{functionResultContent.Result?.ToString()}</function-result>");
+                    Console.ForegroundColor = _defaultForeColor;
+                }
+                else if (content is UsageContent)
+                {
+                    // Don't care
+                }
+                else
+                {
+                    isThinking = null;
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine(content.GetType().Name);
+                    Console.ForegroundColor = _defaultForeColor;
+                }
+            }
+        }
+
+        if (_options.ConversationId == null)
+        {
+            // Stateless API
+            _conversation.AddRange(updates.ToChatResponse().Messages);
+        }
+        else
+        {
+            // Stateful API
+            _conversation.Clear();
         }
     }
 
