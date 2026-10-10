@@ -177,6 +177,7 @@ internal class Program
                 AIFunctionFactory.Create(ListFiles),
                 AIFunctionFactory.Create(ReadFile),
                 AIFunctionFactory.Create(WriteFile),
+                AIFunctionFactory.Create(FindFiles),
             ],
             ToolMode = ChatToolMode.Auto,
         };
@@ -184,7 +185,10 @@ internal class Program
         {
             _options.MaxOutputTokens = 4000;
         }
-        _chatClient = chatClient.AsBuilder().UseFunctionInvocation().Build();
+        _chatClient = chatClient.AsBuilder().UseFunctionInvocation(configure: o =>
+        {
+            o.IncludeDetailedErrors = true;
+        }).Build();
         _defaultForeColor = Console.ForegroundColor;
         _conversation = new List<ChatMessage>();
         _backend = backend;
@@ -353,11 +357,7 @@ internal class Program
 
     private string NormalizePath(string path)
     {
-        if (!Path.IsPathFullyQualified(path))
-        {
-            path = Path.Combine(_rootPath, path);
-        }
-        path = Path.GetFullPath(path);
+        path = Path.GetFullPath(path, _rootPath);
 
         string? remainingPath = path;
         while (remainingPath != null)
@@ -397,6 +397,29 @@ internal class Program
                 sb.Append(Path.DirectorySeparatorChar);
             }
             sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    [Description("Finds files and directories recursively. Optionally takes a glob pattern for file name.")]
+    string FindFiles(string path, string? glob)
+    {
+        path = NormalizePath(path);
+        var di = new DirectoryInfo(path);
+        FileSystemInfo[] infos;
+        if (string.IsNullOrWhiteSpace(glob))
+        {
+            infos = di.GetFileSystemInfos("*", SearchOption.AllDirectories);
+        }
+        else
+        {
+            infos = di.GetFileSystemInfos(glob, SearchOption.AllDirectories);
+        }
+        StringBuilder sb = new();
+        foreach (var fi in infos)
+        {
+            // TODO: perhaps normalize the path to hide the root path?
+            sb.AppendLine(fi.FullName);
         }
         return sb.ToString();
     }
