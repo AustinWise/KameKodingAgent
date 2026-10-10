@@ -235,25 +235,25 @@ internal class Program
             _conversation.Add(new ChatMessage(ChatRole.User, prompt));
 
             var updates = new List<ChatResponseUpdate>();
-            ChatRole? prevRole = null;
+            bool? isThinking = null;
+            string? prevRole = null;
             await foreach (var update in _chatClient.GetStreamingResponseAsync(_conversation, _options))
             {
-                if (update.Contents.Count == 0)
-                    continue;
-
-                updates.Add(update);
-                if (!prevRole.HasValue || (prevRole.HasValue && update.Role.HasValue && prevRole.Value != update.Role.Value))
+                if (update.ConversationId == null)
                 {
-                    if (prevRole.HasValue && updates.Count != 0)
-                    {
-                        _conversation.Add(new ChatMessage(prevRole.Value, [.. updates.SelectMany(u => u.Contents)]));
-                        updates.Clear();
-                    }
+                    updates.Add(update);
+                }
+                else
+                {
+                    _options.ConversationId = update.ConversationId;
+                }
 
-                    var role = update.Role!.Value;
+                if (update.Role.HasValue && (prevRole is null || prevRole != update.Role.Value.Value))
+                {
+                    string role = update.Role.Value.Value;
                     Console.WriteLine();
                     Console.ForegroundColor = GetColorForRole(role);
-                    Console.Write($"{role.Value}: ");
+                    Console.Write($"{role}: ");
                     Console.ForegroundColor = _defaultForeColor;
                     prevRole = role;
                 }
@@ -261,16 +261,27 @@ internal class Program
                 {
                     if (content is TextContent textContent)
                     {
+                        if (isThinking == true)
+                        {
+                            Console.WriteLine();
+                        }
+                        isThinking = false;
                         Console.Write(textContent.Text);
                     }
                     else if (content is TextReasoningContent reasoningContent)
                     {
+                        if (isThinking == false)
+                        {
+                            Console.WriteLine();
+                        }
+                        isThinking = true;
                         Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.Write(reasoningContent.Text);
                         Console.ForegroundColor = _defaultForeColor;
                     }
                     else if (content is FunctionCallContent functionCallContent)
                     {
+                        isThinking = null;
                         Console.WriteLine();
                         Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.WriteLine($"<function-call name='{functionCallContent.Name}' id='{functionCallContent.CallId}'>");
@@ -286,6 +297,7 @@ internal class Program
                     }
                     else if (content is FunctionResultContent functionResultContent)
                     {
+                        isThinking = null;
                         Console.WriteLine();
                         Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.WriteLine($"<function-result id='{functionResultContent.CallId}'>{functionResultContent.Result?.ToString()}</function-result>");
@@ -297,6 +309,7 @@ internal class Program
                     }
                     else
                     {
+                        isThinking = null;
                         Console.ForegroundColor = ConsoleColor.DarkGray;
                         Console.WriteLine(content.GetType().Name);
                         Console.ForegroundColor = _defaultForeColor;
@@ -304,21 +317,26 @@ internal class Program
                 }
             }
 
-            if (prevRole.HasValue && updates.Count != 0)
+            if (_options.ConversationId == null)
             {
-                _conversation.Add(new ChatMessage(prevRole.Value, [.. updates.SelectMany(u => u.Contents)]));
-                updates.Clear();
+                // Stateless API
+                _conversation.AddRange(updates.ToChatResponse().Messages);
+            }
+            else
+            {
+                // Stateful API
+                _conversation.Clear();
             }
         }
     }
 
-    private ConsoleColor GetColorForRole(ChatRole role)
+    private ConsoleColor GetColorForRole(string? role)
     {
-        if (role == ChatRole.Assistant)
+        if (role == ChatRole.Assistant.Value)
         {
             return ConsoleColor.Red;
         }
-        else if (role == ChatRole.Tool)
+        else if (role == ChatRole.Tool.Value)
         {
             return ConsoleColor.Blue;
         }
