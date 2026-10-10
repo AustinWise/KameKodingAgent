@@ -12,9 +12,9 @@ enum LlmBackend
     VertexAi,
     Anthropic,
     Ollama,
-    // The new responses API. More efficent for the offical OpenAI api, but less compatible.
+    // The new responses API. More efficient for the official OpenAI api, but less compatible.
     OpenAiResponses,
-    // The original chat API, widly supported by other API providers like llama.cpp.
+    // The original chat API, widely supported by other API providers like llama.cpp.
     OpenAiChat,
 }
 
@@ -37,7 +37,7 @@ internal class Program
             DefaultValueFactory = _ => LlmBackend.VertexAi,
         };
 
-        Option<string> modelNameOption = new("--model-name")
+        Option<string> modelOption = new("--model")
         {
             Description = "Which model to use. How this is interpreted is based on which LLM is used.",
             DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
@@ -64,7 +64,7 @@ internal class Program
         var rootCommand = new RootCommand("KameKodingAgent");
         rootCommand.Options.Add(rootDirectoryOption);
         rootCommand.Options.Add(llmBackendOption);
-        rootCommand.Options.Add(modelNameOption);
+        rootCommand.Options.Add(modelOption);
         rootCommand.Options.Add(endpointOption);
 
         ParseResult parseResult;
@@ -88,7 +88,7 @@ internal class Program
         }
 
         string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
-        string modelName = parseResult.GetRequiredValue(modelNameOption);
+        string modelName = parseResult.GetRequiredValue(modelOption);
         string? endpoint = parseResult.GetRequiredValue(endpointOption);
         IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
         {
