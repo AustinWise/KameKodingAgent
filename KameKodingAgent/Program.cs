@@ -40,7 +40,7 @@ internal class Program
         Option<string> modelOption = new("--model")
         {
             Description = "Which model to use. How this is interpreted is based on which LLM is used.",
-            DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
+            DefaultValueFactory = a => a.GetValue(llmBackendOption) switch
             {
                 LlmBackend.VertexAi => $"projects/{GCP_PROJECT_ID}/locations/global/publishers/google/models/gemini-3.7-flash",
                 LlmBackend.Anthropic => "claude-haiku-5-5",
@@ -54,7 +54,7 @@ internal class Program
         Option<string?> endpointOption = new("--endpoint")
         {
             Description = "Which endpoint to use with for the API.",
-            DefaultValueFactory = a => a.GetRequiredValue(llmBackendOption) switch
+            DefaultValueFactory = a => a.GetValue(llmBackendOption) switch
             {
                 LlmBackend.Ollama => "http://localhost:11434",
                 _ => null,
@@ -66,6 +66,15 @@ internal class Program
         rootCommand.Options.Add(llmBackendOption);
         rootCommand.Options.Add(modelOption);
         rootCommand.Options.Add(endpointOption);
+
+        rootCommand.SetAction(async parseResult =>
+        {
+            LlmBackend llmBackend = parseResult.GetValue(llmBackendOption);
+            string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
+            string modelName = parseResult.GetRequiredValue(modelOption);
+            string? endpoint = parseResult.GetRequiredValue(endpointOption);
+            await MainCore(llmBackend, rootDirectory, modelName, endpoint);
+        });
 
         ParseResult parseResult;
         try
@@ -87,10 +96,12 @@ internal class Program
             return 1;
         }
 
-        string rootDirectory = parseResult.GetRequiredValue(rootDirectoryOption);
-        string modelName = parseResult.GetRequiredValue(modelOption);
-        string? endpoint = parseResult.GetRequiredValue(endpointOption);
-        IChatClient chatClient = parseResult.GetRequiredValue(llmBackendOption) switch
+        return await parseResult.InvokeAsync();
+    }
+
+    private static async Task MainCore(LlmBackend llmBackend, string rootDirectory, string modelName, string? endpoint)
+    {
+        IChatClient chatClient = llmBackend switch
         {
             LlmBackend.VertexAi => CreateVertexAiChatClient(),
             LlmBackend.Anthropic => new Anthropic.AnthropicClient().AsIChatClient(),
@@ -100,9 +111,8 @@ internal class Program
             _ => throw new Exception("Programming error: unhandled LLM backend."),
         };
 
-        var program = new Program(chatClient, rootDirectory, parseResult.GetRequiredValue(llmBackendOption), modelName);
+        var program = new Program(chatClient, rootDirectory, llmBackend, modelName);
         await program.Run();
-        return 0;
     }
 
 #pragma warning disable OPENAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
